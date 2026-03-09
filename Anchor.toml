@@ -1,0 +1,19 @@
+package_manager = "npm"
+
+[features]
+resolution = true
+skip-lint = false
+idl-build = false
+
+[programs.localnet]
+crowdfunding = "7KUPLcHBAA5rGoq7LawQWBkCBGNgiaUoqsVsvKrtZyzJ"
+
+[test.validator]
+startup_wait = 15000
+
+[provider]
+cluster = "localnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "npm test"
