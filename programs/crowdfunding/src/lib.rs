@@ -54,16 +54,17 @@ pub mod crowdfunding {
         let donor_acct = &mut ctx.accounts.donor;
         donor_acct.campaign = campaign_key;
         donor_acct.donor = ctx.accounts.contributor.key();
-        donor_acct.amount += amount;
+        donor_acct.amount = donor_acct.amount.checked_add(amount).ok_or(ErrorCode::Overflow)?;
 
         // Update campaign raised amount
-        campaign.raised += amount;
+        campaign.raised = campaign.raised.checked_add(amount).ok_or(ErrorCode::Overflow)?;
         msg!("Contributed: {} lamports, total={}", amount, campaign.raised);
         Ok(())
     }
 
     pub fn withdraw(ctx: Context<Withdraw>) -> Result<()> {
         let clock = Clock::get()?;
+        let campaign_key = ctx.accounts.campaign.key();
         let campaign = &mut ctx.accounts.campaign;
 
         require!(campaign.raised >= campaign.goal, ErrorCode::GoalNotReached);
@@ -73,12 +74,28 @@ pub mod crowdfunding {
 
         // Transfer all lamports from vault PDA to creator
         let vault_info = ctx.accounts.vault.to_account_info();
-        let creator_info = ctx.accounts.creator.to_account_info();
-        
         let vault_lamports = vault_info.lamports();
         
-        **vault_info.lamports.borrow_mut() = 0;
-        **creator_info.lamports.borrow_mut() += vault_lamports;
+        let vault_bump = *ctx.bumps.get("vault").ok_or(ErrorCode::BumpError)?;
+        let seeds = &[
+            b"vault",
+            campaign_key.as_ref(),
+            &[vault_bump]
+        ];
+
+        invoke_signed(
+            &system_instruction::transfer(
+                ctx.accounts.vault.key,
+                ctx.accounts.creator.key,
+                vault_lamports,
+            ),
+            &[
+                ctx.accounts.vault.to_account_info(),
+                ctx.accounts.creator.to_account_info(),
+                ctx.accounts.system_program.to_account_info(),
+            ],
+            &[seeds],
+        )?;
         
         campaign.claimed = true;
         msg!("Withdrawn: {} lamports", vault_lamports);
@@ -88,6 +105,7 @@ pub mod crowdfunding {
 
     pub fn refund(ctx: Context<Refund>) -> Result<()> {
         let clock = Clock::get()?;
+        let campaign_key = ctx.accounts.campaign.key();
         let campaign = &mut ctx.accounts.campaign;
 
         require!(clock.unix_timestamp >= campaign.deadline, ErrorCode::DeadlineNotReached);
@@ -97,8 +115,7 @@ pub mod crowdfunding {
         let refund_amount = donor_acct.amount;
         require!(refund_amount > 0, ErrorCode::AlreadyRefunded);
 
-        let campaign_key = ctx.accounts.campaign.key();
-        let vault_bump = *ctx.bumps.get("vault").unwrap();
+        let vault_bump = *ctx.bumps.get("vault").ok_or(ErrorCode::BumpError)?;
         let seeds = &[
             b"vault",
             campaign_key.as_ref(),
@@ -172,6 +189,7 @@ pub struct Withdraw<'info> {
     pub vault: SystemAccount<'info>,
     #[account(mut)]
     pub creator: Signer<'info>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -186,6 +204,7 @@ pub struct Refund<'info> {
     pub vault: SystemAccount<'info>,
     #[account(
         mut,
+        close = donor_account,
         seeds = [b"donor", campaign.key().as_ref(), donor_account.key().as_ref()],
         bump,
     )]
@@ -235,4 +254,8 @@ pub enum ErrorCode {
     GoalReached,
     #[msg("Already refunded")]
     AlreadyRefunded,
+    #[msg("Arithmetic overflow")]
+    Overflow,
+    #[msg("Failed to get bump seed")]
+    BumpError,
 }
