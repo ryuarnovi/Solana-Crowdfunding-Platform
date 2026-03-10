@@ -4,7 +4,7 @@ use anchor_lang::solana_program::{
     system_instruction,
 };
 
-declare_id!("7KUPLcHBAA5rGoq7LawQWBkCBGNgiaUoqsVsvKrtZyzJ");
+declare_id!("ID_solana");
 
 #[program]
 pub mod crowdfunding {
